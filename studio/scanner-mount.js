@@ -30,10 +30,16 @@
       store.appendChild(mm.node); if (mm.node.src && mm.node.src.indexOf("blob:") === 0) urls.push(mm.node.src);
     }
     container.appendChild(store);
-    Studio.topLevelElements(rec).forEach((el, idx) => {
-      const e = Studio.buildElementEntity(rec, el, idx, "ar", { mediaId: mid });
-      if (e) holder.appendChild(e);
-    });
+    // buildElementEntity creates blob URLs itself (glTF models, particle sprites). Capture exactly those created during the
+    // synchronous build so the mount owns them and revokes them on destroy (not before: the loaders read them asynchronously).
+    const realCreate = URL.createObjectURL;
+    URL.createObjectURL = function (o) { const u = realCreate.call(URL, o); urls.push(u); return u; };
+    try {
+      Studio.topLevelElements(rec).forEach((el, idx) => {
+        const e = Studio.buildElementEntity(rec, el, idx, "ar", { mediaId: mid });
+        if (e) holder.appendChild(e);
+      });
+    } finally { URL.createObjectURL = realCreate; }
     container.appendChild(holder);
     // studio-target-video / track components listen for xrextrasfound/lost on their PARENT (the image-target entity in the player).
     // The scanner has no per-scene target entity, so the mount re-emits them on those parents: found on mount and resume, lost on pause.

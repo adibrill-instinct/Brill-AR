@@ -7,6 +7,7 @@ try{const p=await (await b.newContext({viewport:{width:390,height:844}})).newPag
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const glb=await (await fetch(base+'/library/gem.glb')).blob();
   const mk=(id,els,assets)=>{const rec=Studio.blankExperience(id);rec.id=id;rec.target={artRect:{x:0,y:0,w:768,h:1024},natural:{w:768,h:1024}};rec.assets=assets||{};rec.elements=els;return rec;};
+  window.__made=[];window.__revoked=[];const rc=URL.createObjectURL,rv=URL.revokeObjectURL;URL.createObjectURL=function(o){const u=rc.call(URL,o);window.__made.push(u);return u};URL.revokeObjectURL=function(u){window.__revoked.push(u);return rv.call(URL,u)};
   const scn=document.createElement('a-scene');window.HTMLElement.prototype.setAttribute.call(scn,'gltf-model','dracoDecoderPath: '+Studio.DECODER_DRACO_PATH+'; meshoptDecoderPath: '+Studio.DECODER_MESHOPT_PATH);
   scn.setAttribute('embedded','');scn.setAttribute('vr-mode-ui','enabled: false');scn.style.cssText='position:fixed;inset:0;z-index:99999';
   const cam=document.createElement('a-entity');cam.setAttribute('camera','fov: 50');cam.setAttribute('position','0 0 1.6');scn.appendChild(cam);const box=window.__box=document.createElement('a-entity');scn.appendChild(box);document.body.appendChild(scn);
@@ -22,10 +23,17 @@ try{const p=await (await b.newContext({viewport:{width:390,height:844}})).newPag
  const shown=await shot();require('fs').writeFileSync('/downloads/scanner-render-model-'+Date.now()+'.png',shown);const dShown=await diff(empty,shown);
  await p.evaluate(()=>window.__sc.lost('a'));await p.waitForTimeout(800);const hidden=await shot();const dHidden=await diff(empty,hidden);
  await p.evaluate(()=>window.__sc.found('a'));await p.waitForTimeout(1200);const back=await shot();const dBack=await diff(empty,back);
+ const before=await p.evaluate(()=>({made:window.__made.length,revokedWhileShown:window.__revoked.length}));
  await p.evaluate(()=>window.__sc.found('b'));await p.waitForTimeout(2500);
+ const leak=await p.evaluate(()=>{const mine=window.__made.filter(u=>!window.__revoked.includes(u));return {made:window.__made.length,revoked:window.__revoked.length,unrevoked:mine.length}});
+ for(const n of ['a','b','a']){await p.evaluate(n=>window.__sc.found(n),n);await p.waitForTimeout(2200);}
+ const loop=await p.evaluate(()=>({made:window.__made.length,revoked:window.__revoked.length,models:document.querySelectorAll('[data-el-id="m1"]').length}));
+ assert(loop.made===3&&loop.revoked===2&&loop.models===1,'a>b>a>b>a: 3 model blob URLs made, the 2 from unmounted scenes revoked, one live model: '+JSON.stringify(loop));
+ await p.evaluate(()=>window.__sc.found('b'));await p.waitForTimeout(2200);
  const after=await p.evaluate(()=>({models:document.querySelectorAll('[data-el-id="m1"]').length,holders:[...document.querySelectorAll('[data-scanner-scene]')].map(h=>h.dataset.scannerScene)}));
- console.log(JSON.stringify({dShown,dHidden,dBack,after,errs}));
+ console.log(JSON.stringify({before,leak,dShown,dHidden,dBack,after,errs}));
  assert(dShown>3000,'model visible on canvas: '+dShown);assert(dHidden<500,'model hidden after lost: '+dHidden);assert(dBack>3000,'model visible again on resume: '+dBack);
+ assert(before.made>=1&&before.revokedWhileShown===0,'model blob URL exists and is NOT revoked while shown: '+JSON.stringify(before));assert.equal(leak.unrevoked,0,'every blob URL created for scene A is revoked after the switch: '+JSON.stringify(leak));
  assert.deepEqual(after,{models:0,holders:['scene-bbbb000']});assert.deepEqual(errs,[]);
  console.log('PASS scanner-render-model: glb mesh loads, visible by pixels, hidden on lost, back on resume, removed on switch (headless SwiftShader; no engine/camera/recognition)');
 }finally{await b.close();server.close();}})().catch(e=>{console.error(e&&e.stack||e);process.exit(1)});
