@@ -35,10 +35,20 @@
       if (e) holder.appendChild(e);
     });
     container.appendChild(holder);
+    // studio-target-video / track components listen for xrextrasfound/lost on their PARENT (the image-target entity in the player).
+    // The scanner has no per-scene target entity, so the mount re-emits them on those parents: found on mount and resume, lost on pause.
+    const parents = () => [...new Set([...holder.querySelectorAll("[studio-target-video]")].map((n) => n.parentNode))];
+    const emit = (t) => parents().forEach((n) => { try { n.emit ? n.emit(t, {}, false) : n.dispatchEvent(new CustomEvent(t)); } catch (e) {} });
+    const ready = async () => {
+      const need = () => [...holder.querySelectorAll("[studio-target-video]")].every((n) => n.components && n.components["studio-target-video"]);
+      for (let i = 0; i < 40 && !need(); i++) await new Promise((r) => setTimeout(r, 50));
+    };
     const all = () => [...holder.querySelectorAll("video,audio"), ...store.querySelectorAll("video,audio"), ...media];
+    await ready();
+    emit("xrextrasfound");
     return {
-      pause() { all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
-      resume() { all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
+      pause() { emit("xrextraslost"); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
+      resume() { emit("xrextrasfound"); all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
       destroy() { all().forEach((m) => { try { m.pause(); m.removeAttribute("src"); m.load(); m.remove(); } catch (e) {} }); holder.remove(); store.remove(); urls.forEach((u) => URL.revokeObjectURL(u)); },
     };
   }
