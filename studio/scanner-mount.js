@@ -43,9 +43,23 @@
     container.appendChild(holder);
     // Player runtime parity, step 1: opacity and the timeline driver (keyframe motion plays while found, freezes while lost).
     holder.querySelectorAll("[data-el-id]").forEach((n) => { if (n.dataset.opacity) Studio.applyOpacity(n, parseFloat(n.dataset.opacity)); });
+    // step 2: parallel tracks (autostart then paused until found) and state/sequence visibility, same calls as the player
+    let curSeq = Studio.seqList(rec).length ? Studio.seqList(rec)[0].id : null;
+    const trackRunner = Studio.makeTrackRunner(rec, holder);
+    const refreshVisibility = () => Studio.applySequence(holder, rec, curSeq, null, (id) => trackRunner.isPlaying(id));
+    trackRunner.autoStart(); trackRunner.pauseAll(); refreshVisibility();
+    const seqRunner = Studio.makeSeqRunner(rec, (to) => setSequence(to));
+    function setSequence(id) {
+      if (!Studio.seqList(rec).some((x) => x.id === id)) return;
+      curSeq = id; refreshVisibility();
+      if (tlDrv) { tlDrv.stateLoop = !!(Studio.seqList(rec).find((x) => x.id === curSeq) || {}).loop; tlDrv.reset(); }
+      seqRunner.enter(curSeq);
+    }
     const tlDrv = Studio.startTimelineDriver(rec, [...holder.querySelectorAll("[data-el-id]")].filter((n) => {
       const el = rec.elements.find((x) => x.id === n.dataset.elId); return el && !el.track;
     }), { autostart: false });
+    if (tlDrv) tlDrv.stateLoop = !!(Studio.seqList(rec).find((x) => x.id === curSeq) || {}).loop;
+    seqRunner.enter(curSeq);
     // studio-target-video / track components listen for xrextrasfound/lost on their PARENT (the image-target entity in the player).
     // The scanner has no per-scene target entity, so the mount re-emits them on those parents: found on mount and resume, lost on pause.
     const parents = () => [...new Set([...holder.querySelectorAll("[studio-target-video]")].map((n) => n.parentNode))];
@@ -56,13 +70,14 @@
     };
     const all = () => [...holder.querySelectorAll("video,audio"), ...store.querySelectorAll("video,audio"), ...media];
     await ready();
-    emit("xrextrasfound"); if (tlDrv) tlDrv.play();
+    emit("xrextrasfound"); if (tlDrv) tlDrv.play(); trackRunner.resumeAll();
     // found = visible now, so start media as the player does after found (muted video autoplays; audio may wait for a tap)
     all().forEach((m) => { try { const pr = m.play(); pr && pr.catch && pr.catch(() => {}); } catch (e) {} });
     return {
-      pause() { holder.setAttribute("visible", false); emit("xrextraslost"); if (tlDrv) tlDrv.pause(); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
-      resume() { holder.setAttribute("visible", true); emit("xrextrasfound"); if (tlDrv) tlDrv.play(); all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
-      destroy() { if (tlDrv) tlDrv.dispose(); all().forEach((m) => { try { m.pause(); m.removeAttribute("src"); m.load(); m.remove(); } catch (e) {} }); holder.remove(); store.remove(); urls.forEach((u) => URL.revokeObjectURL(u)); },
+      state: () => ({ seq: curSeq, tracks: Studio.trackList(rec).map((t) => [t.id, trackRunner.isPlaying(t.id)]) }), setSequence, trackRunner,
+      pause() { holder.setAttribute("visible", false); emit("xrextraslost"); if (tlDrv) tlDrv.pause(); trackRunner.pauseAll(); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
+      resume() { holder.setAttribute("visible", true); emit("xrextrasfound"); if (tlDrv) tlDrv.play(); trackRunner.resumeAll(); all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
+      destroy() { if (tlDrv) tlDrv.dispose(); trackRunner.dispose(); seqRunner.cancel(); all().forEach((m) => { try { m.pause(); m.removeAttribute("src"); m.load(); m.remove(); } catch (e) {} }); holder.remove(); store.remove(); urls.forEach((u) => URL.revokeObjectURL(u)); },
     };
   }
   root.ScannerMount = { mountScene };

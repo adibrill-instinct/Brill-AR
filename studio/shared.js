@@ -1441,7 +1441,8 @@ const Studio = (() => {
       toggle(id) { if (this.isPlaying(id)) this.stop(id); else this.start(id); },
       pauseAll() { for (const id of Object.keys(run)) if (run[id].playing && run[id].drv) run[id].drv.pause(); },
       resumeAll() { for (const id of Object.keys(run)) if (run[id].playing && run[id].drv) run[id].drv.play(); },
-      autoStart() { for (const tr of trackList(rec)) if (tr.autoStart) this.start(tr.id); }
+      autoStart() { for (const tr of trackList(rec)) if (tr.autoStart) this.start(tr.id); },
+      dispose() { for (const id of Object.keys(run)) { if (run[id].drv && run[id].drv.dispose) run[id].drv.dispose(); run[id].playing = false; } }
     };
   }
 
