@@ -10,7 +10,7 @@ try{const ctx=await b.newContext({viewport:{width:390,height:844}});const p=awai
  assert.deepEqual(boot.cfg,['demo-a','demo-b']);assert.deepEqual(boot.boot.skipped,[]);assert.equal(boot.n,2);
  await p.evaluate(()=>{const s=document.querySelector('a-scene');const k=()=>{try{s.play()}catch(e){}};k();setTimeout(k,600);s.querySelector('a-camera').setAttribute('position','0 0 1.6');});
  await p.waitForFunction(()=>document.querySelector('a-scene').hasLoaded,null,{timeout:20000});await p.waitForTimeout(500);
- const fire=(t,n)=>p.evaluate(([t,n])=>document.querySelector('a-scene').dispatchEvent(new CustomEvent(t,{detail:{name:n}})),[t,n]);
+ const fire=(t,n)=>p.evaluate(([t,n])=>document.querySelector('a-scene').dispatchEvent(new CustomEvent(t,{detail:{name:n,position:new THREE.Vector3(0,0,0),rotation:new THREE.Quaternion(),scale:1}})),[t,n]);
  const px=async()=>{const buf=await p.screenshot();return p.evaluate(async(d)=>{const im=new Image();im.src='data:image/png;base64,'+d;await im.decode();const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const g=c.getContext('2d');g.drawImage(im,0,0);const a=g.getImageData(0,0,c.width,c.height).data;let red=0,green=0;for(let i=0;i<a.length;i+=4){if(a[i]>200&&a[i+1]<60&&a[i+2]<60)red++;if(a[i+1]>140&&a[i]<80&&a[i+2]<100)green++;}return {red,green};},buf.toString('base64'));};
  const holders=()=>p.evaluate(()=>[...document.querySelectorAll('[data-scanner-scene]')].map(h=>h.dataset.scannerScene));
  const state=()=>p.evaluate(()=>[document.body.dataset.scanState,document.body.dataset.scanTarget,document.getElementById('scan-status').textContent]);

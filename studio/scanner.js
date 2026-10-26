@@ -40,7 +40,7 @@
     onState: (s, x) => { say(s); document.body.dataset.scanState = s; document.body.dataset.scanTarget = (x && x.name) || ""; },
   });
   window.__scanner = core;
-  ScannerEngine.attach(scene, core);
+  ScannerEngine.attach(scene, core, container);
   document.body.appendChild(scene);
   say("scanning");
   const setup = () => { XR8.XrController.configure({ imageTargetData: targets }); window.__scannerConfigured = targets.length; };
