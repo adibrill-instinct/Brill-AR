@@ -2,6 +2,10 @@
    guarantees teardown (media paused and released, nodes removed). Prototype, not wired to player.html. */
 (function (root) {
   function mountScene(rec, container, extraMedia) {
+    // A-Frame's entity teardown calls parentEl.remove(child); on a plain element that removes the PARENT itself.
+    // So the container must be an A-Frame entity or scene (a plain div would be deleted on scene switch).
+    const tag = container && container.tagName ? container.tagName.toLowerCase() : "";
+    if (tag !== "a-entity" && tag !== "a-scene") throw new Error("ScannerMount: container must be an a-entity or a-scene, got <" + tag + ">");
     const holder = document.createElement("a-entity"); holder.dataset.scannerScene = rec.id;
     const media = (extraMedia || []).slice(), urls = [];
     // media is built from the scene's own assets (same attributes as player.js) with ids namespaced by scene id

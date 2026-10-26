@@ -5,7 +5,7 @@ try{const p=await b.newPage();await p.goto(base+'/index.html');await p.waitForSe
  for(const f of ['scanner-core.js','scanner-mount.js'])await p.addScriptTag({url:base+'/'+f});
  const r=await p.evaluate(async(base)=>{
   const mkRec=(id)=>{const rec=Studio.blankExperience(id);rec.id=id;rec.target={artRect:{x:0,y:0,w:768,h:1024},natural:{w:768,h:1024}};rec.elements=[{id:'t1',type:'text',text:id,x:.5,y:.5,w:.4,h:.1,scale:1}];return rec;};
-  const box=document.createElement('div');document.body.appendChild(box);const made=[];
+  const scn=document.createElement('a-scene');scn.setAttribute('embedded','');scn.style.cssText='width:200px;height:200px';document.body.appendChild(scn);const box=document.createElement('a-entity');scn.appendChild(box);const made=[];
   const mk=async(kind)=>{const m=document.createElement(kind);m.src=base+(kind==='video'?'/assets/demo/art-video.mp4':'/assets/demo/art-audio.mp3');m.muted=true;m.loop=true;document.body.appendChild(m);await m.play();made.push(m);return m;};
   const sc=ScannerCore.create({catalog:[{name:'a',scene:'scene-aaaa000'},{name:'b',scene:'scene-bbbb000'}],loadScene:async id=>mkRec(id),
    mount:async(rec)=>{const v=await mk('video'),a=await mk('audio');return ScannerMount.mountScene(rec,box,[v,a]);}});
