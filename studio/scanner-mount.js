@@ -46,9 +46,11 @@
     const all = () => [...holder.querySelectorAll("video,audio"), ...store.querySelectorAll("video,audio"), ...media];
     await ready();
     emit("xrextrasfound");
+    // found = visible now, so start media as the player does after found (muted video autoplays; audio may wait for a tap)
+    all().forEach((m) => { try { const pr = m.play(); pr && pr.catch && pr.catch(() => {}); } catch (e) {} });
     return {
-      pause() { emit("xrextraslost"); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
-      resume() { emit("xrextrasfound"); all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
+      pause() { holder.setAttribute("visible", false); emit("xrextraslost"); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
+      resume() { holder.setAttribute("visible", true); emit("xrextrasfound"); all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
       destroy() { all().forEach((m) => { try { m.pause(); m.removeAttribute("src"); m.load(); m.remove(); } catch (e) {} }); holder.remove(); store.remove(); urls.forEach((u) => URL.revokeObjectURL(u)); },
     };
   }

@@ -27,5 +27,6 @@ try{const p=await (await b.newContext({viewport:{width:390,height:844}})).newPag
  const shotB=await p.screenshot({path:'/downloads/scanner-render-b-390.png'});const cb=await count(shotB);
  assert.deepEqual(sw.holders,['scene-bbbb000']);assert.deepEqual(sw.media,['m-scene-bbbb000-vid','m-scene-bbbb000-im']);assert(sw.conn);
  assert(cb.green>2000&&cb.red===0,'after switch only scene B image (green) is visible: '+JSON.stringify(cb));
- console.log('PASS scanner-render (headless SwiftShader 390x844, kicked a-scene + camera, no engine): text+image+video entities load with namespaced media, image visible on canvas (A red '+ca.red+'px), switch to B shows green '+cb.green+'px and no red, one holder, container intact. Video plane stays faded out until xrimagefound (not simulated here)');
+ const lostB=await p.evaluate(async()=>{window.__sc.lost('b');await new Promise(r=>setTimeout(r,800));return window.__sc.info().state;});const cl=await count(await p.screenshot());assert.equal(lostB,'lost');assert(cl.green<500,'content hidden after lost: '+JSON.stringify(cl));
+ console.log('PASS scanner-render (headless SwiftShader 390x844, kicked a-scene + camera, no engine): text+image+video entities load with namespaced media, image visible on canvas (A red '+ca.red+'px), switch to B shows green '+cb.green+'px and no red, one holder, container intact, lost hides content (green px '+cl.green+'). Video fade-in covered by scanner-render-video');
 }finally{await b.close();await new Promise(r=>server.close(r));}})().catch(e=>{console.error(e);process.exit(1)});
