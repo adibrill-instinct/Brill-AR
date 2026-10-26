@@ -1,0 +1,23 @@
+const {chromium}=require('playwright-core'),assert=require('assert/strict'),fs=require('fs'),os=require('os'),path=require('path'),{execFileSync}=require('child_process'),server=require('../../server/server');
+// The chroma key EFFECT by pixels, through the scanner mount (kicked a-scene, headless SwiftShader 390x844, no engine/camera/recognition). A generated video (left half pure green, right half pure red) is mounted twice: chroma OFF must show green and red; chroma ON (key #00ff00) must remove the green and keep the red. No user art: ffmpeg lavfi colours.
+(async()=>{const mp4=path.join(os.tmpdir(),'chroma-gr.mp4');
+ execFileSync('ffmpeg',['-y','-v','error','-f','lavfi','-i','color=c=0x00ff00:s=128x256:d=3:r=15','-f','lavfi','-i','color=c=0xff0000:s=128x256:d=3:r=15','-filter_complex','[0][1]hstack','-c:v','libx264','-pix_fmt','yuv420p',mp4]);
+ const b64=fs.readFileSync(mp4).toString('base64');
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port,b=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist','--autoplay-policy=no-user-gesture-required']});
+ const run=async(chroma)=>{const p=await (await b.newContext({viewport:{width:390,height:844}})).newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));await p.goto(base+'/index.html');await p.waitForSelector('#element-list li');
+  for(const f of ['scanner-core.js','scanner-mount.js'])await p.addScriptTag({url:base+'/'+f});
+  await p.evaluate(async([b64,chroma])=>{const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+   document.body.style.background='#000';[...document.body.children].forEach(c=>{c.style.visibility='hidden'});
+   const vb=new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))],{type:'video/mp4'});
+   const rec=Studio.blankExperience('scene-aaaa000');rec.id='scene-aaaa000';rec.target={artRect:{x:0,y:0,w:768,h:1024},natural:{w:768,h:1024}};rec.assets={v1:vb};rec.elements=[{id:'vid',type:'video',assetId:'v1',x:0,y:0,w:.8,aspect:.5,scale:1,...(chroma?{chroma:{enabled:true,color:'#00ff00',threshold:.35}}:{})}];
+   const scn=document.createElement('a-scene');scn.setAttribute('embedded','');scn.setAttribute('vr-mode-ui','enabled: false');scn.style.cssText='position:fixed;inset:0;z-index:99999;background:#000';
+   const cam=document.createElement('a-entity');cam.setAttribute('camera','fov: 50');cam.setAttribute('position','0 0 1.6');scn.appendChild(cam);const box=document.createElement('a-entity');scn.appendChild(box);document.body.appendChild(scn);
+   const kick=()=>{try{scn.play()}catch(e){}};kick();setTimeout(kick,600);await new Promise(r=>scn.hasLoaded?r():scn.addEventListener('loaded',r,{once:true}));await sleep(500);
+   const sc=ScannerCore.create({catalog:[{name:'a',scene:'scene-aaaa000'}],loadScene:async()=>rec,mount:async r=>ScannerMount.mountScene(r,box)});await sc.found('a');await sleep(4000);},[b64,chroma]);
+  const buf=await p.screenshot();fs.writeFileSync('/downloads/scanner-chroma-'+(chroma?'on':'off')+'-'+Date.now()+'.png',buf);
+  const c=await p.evaluate(async d=>{const im=new Image();im.src='data:image/png;base64,'+d;await im.decode();const cv=document.createElement('canvas');cv.width=im.width;cv.height=im.height;const g=cv.getContext('2d');g.drawImage(im,0,0);const a=g.getImageData(0,0,cv.width,cv.height).data;let green=0,red=0;for(let i=0;i<a.length;i+=4){if(a[i]<40&&a[i+1]>200&&a[i+2]<40)green++;if(a[i]>200&&a[i+1]<40&&a[i+2]<40)red++;}return {green,red}},buf.toString('base64'));return {c,errs};};
+ try{const off=await run(false),on=await run(true);console.log(JSON.stringify({off,on}));
+  assert(off.c.green>3000&&off.c.red>3000,'chroma OFF shows both green and red: '+JSON.stringify(off.c));
+  assert(on.c.green<300,'chroma ON removes the keyed green: '+JSON.stringify(on.c));assert(on.c.red>3000,'chroma ON keeps the red: '+JSON.stringify(on.c));assert.deepEqual(off.errs.concat(on.errs),[]);
+  console.log('PASS scanner-chroma-pixels: key #00ff00 removes green, keeps red (headless; no engine/camera/recognition)');
+ }finally{await b.close();server.close();}})().catch(e=>{console.error(e&&e.stack||e);process.exit(1)});
