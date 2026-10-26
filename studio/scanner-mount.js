@@ -41,6 +41,11 @@
       });
     } finally { URL.createObjectURL = realCreate; }
     container.appendChild(holder);
+    // Player runtime parity, step 1: opacity and the timeline driver (keyframe motion plays while found, freezes while lost).
+    holder.querySelectorAll("[data-el-id]").forEach((n) => { if (n.dataset.opacity) Studio.applyOpacity(n, parseFloat(n.dataset.opacity)); });
+    const tlDrv = Studio.startTimelineDriver(rec, [...holder.querySelectorAll("[data-el-id]")].filter((n) => {
+      const el = rec.elements.find((x) => x.id === n.dataset.elId); return el && !el.track;
+    }), { autostart: false });
     // studio-target-video / track components listen for xrextrasfound/lost on their PARENT (the image-target entity in the player).
     // The scanner has no per-scene target entity, so the mount re-emits them on those parents: found on mount and resume, lost on pause.
     const parents = () => [...new Set([...holder.querySelectorAll("[studio-target-video]")].map((n) => n.parentNode))];
@@ -51,13 +56,13 @@
     };
     const all = () => [...holder.querySelectorAll("video,audio"), ...store.querySelectorAll("video,audio"), ...media];
     await ready();
-    emit("xrextrasfound");
+    emit("xrextrasfound"); if (tlDrv) tlDrv.play();
     // found = visible now, so start media as the player does after found (muted video autoplays; audio may wait for a tap)
     all().forEach((m) => { try { const pr = m.play(); pr && pr.catch && pr.catch(() => {}); } catch (e) {} });
     return {
-      pause() { holder.setAttribute("visible", false); emit("xrextraslost"); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
-      resume() { holder.setAttribute("visible", true); emit("xrextrasfound"); all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
-      destroy() { all().forEach((m) => { try { m.pause(); m.removeAttribute("src"); m.load(); m.remove(); } catch (e) {} }); holder.remove(); store.remove(); urls.forEach((u) => URL.revokeObjectURL(u)); },
+      pause() { holder.setAttribute("visible", false); emit("xrextraslost"); if (tlDrv) tlDrv.pause(); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
+      resume() { holder.setAttribute("visible", true); emit("xrextrasfound"); if (tlDrv) tlDrv.play(); all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
+      destroy() { if (tlDrv) tlDrv.dispose(); all().forEach((m) => { try { m.pause(); m.removeAttribute("src"); m.load(); m.remove(); } catch (e) {} }); holder.remove(); store.remove(); urls.forEach((u) => URL.revokeObjectURL(u)); },
     };
   }
   root.ScannerMount = { mountScene };

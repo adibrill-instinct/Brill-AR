@@ -922,7 +922,9 @@ const Studio = (() => {
     drv.pause = () => { if (!drv.running) return; drv.running = false; const now = performance.now(); for (const tr of tracks) tr.elapsed = (now - tr.startedAt) / 1000; };
     drv.reset = () => { const now = performance.now(); for (const tr of tracks) { tr.elapsed = 0; tr.startedAt = now; } };
     if (opts.autostart !== false) drv.play();
+    let disposed = false; drv.dispose = () => { disposed = true; drv.running = false; };
     const frame = (now) => {
+      if (disposed) return;
       if (drv.running) {
         // per-state loop: when every non-looping track reached its end, replay them together
         if (drv.stateLoop) {
