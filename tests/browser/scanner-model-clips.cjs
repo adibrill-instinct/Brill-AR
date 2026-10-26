@@ -1,0 +1,31 @@
+const {chromium}=require('playwright-core'),assert=require('assert/strict'),fs=require('fs'),path=require('path'),server=require('../../server/server');
+// Animated model clip lifecycle in the scanner mount, REAL kicked a-scene (headless, no engine, no camera, no recognition). Fixture: tests/fixtures/animated.glb (one clip "sway"). The model-clips mixer time must advance while shown, freeze while lost (holder hidden), and advance again on resume; scene-level xrimagelost/xrimagefound (what the real engine emits) must freeze/resume it too.
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port,b=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
+try{const p=await (await b.newContext({viewport:{width:390,height:844}})).newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));await p.goto(base+'/index.html');await p.waitForSelector('#element-list li');
+ for(const f of ['scanner-core.js','scanner-mount.js'])await p.addScriptTag({url:base+'/'+f});
+ const b64=fs.readFileSync(path.join(__dirname,'../fixtures/animated.glb')).toString('base64');
+ const r=await p.evaluate(async(b64)=>{
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const glb=new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))],{type:'model/gltf-binary'});
+  const rec=Studio.blankExperience('scene-aaaa000');rec.id='scene-aaaa000';rec.target={artRect:{x:0,y:0,w:768,h:1024},natural:{w:768,h:1024}};rec.assets={g1:glb};rec.elements=[{id:'m1',type:'model',assetId:'g1',x:0,y:0,w:.5,aspect:1,scale:1,modelPlaying:true}];
+  const scn=document.createElement('a-scene');window.HTMLElement.prototype.setAttribute.call(scn,'gltf-model','dracoDecoderPath: '+Studio.DECODER_DRACO_PATH+'; meshoptDecoderPath: '+Studio.DECODER_MESHOPT_PATH);
+  scn.setAttribute('embedded','');scn.setAttribute('vr-mode-ui','enabled: false');scn.style.cssText='position:fixed;inset:0;z-index:99999';
+  const cam=document.createElement('a-entity');cam.setAttribute('camera','fov: 50');cam.setAttribute('position','0 0 1.6');scn.appendChild(cam);const box=document.createElement('a-entity');scn.appendChild(box);document.body.appendChild(scn);
+  const kick=()=>{try{scn.play()}catch(e){}};kick();setTimeout(kick,600);await new Promise(r=>scn.hasLoaded?r():scn.addEventListener('loaded',r,{once:true}));await sleep(500);
+  const sc=ScannerCore.create({catalog:[{name:'a',scene:'scene-aaaa000'}],loadScene:async()=>rec,mount:async x=>ScannerMount.mountScene(x,box)});
+  await sc.found('a');
+  const mc=()=>document.querySelector('[data-el-id="m1"] [model-clips]').components['model-clips'];
+  for(let i=0;i<40&&!(mc().mixer);i++)await sleep(150);
+  const t=()=>+mc().mixer.time.toFixed(3);const o={clipCount:document.querySelector('[data-el-id="m1"] [model-clips]').dataset.clipCount};
+  const adv=async()=>{const a=t();await sleep(700);return +(t()-a).toFixed(3);};
+  o.shown=await adv();
+  sc.lost('a');await sleep(300);o.lost=await adv();
+  sc.found('a');await sleep(300);o.resumed=await adv();
+  scn.emit('xrimagelost',{name:'a'});await sleep(300);o.sceneLost=await adv();
+  scn.emit('xrimagefound',{name:'a'});await sleep(300);o.sceneFound=await adv();
+  return o;},b64);
+ console.log(JSON.stringify({r,errs}));
+ assert.equal(r.clipCount,'1');assert(r.shown>0.3,'clip advances while shown: '+r.shown);assert.equal(r.lost,0,'clip frozen while lost');assert(r.resumed>0.3,'clip advances after resume: '+r.resumed);
+ assert.equal(r.sceneLost,0,'clip frozen on scene xrimagelost');assert(r.sceneFound>0.3,'clip advances on scene xrimagefound: '+r.sceneFound);assert.deepEqual(errs,[]);
+ console.log('PASS scanner-model-clips: mixer time advances shown, freezes on lost, resumes (headless; no engine/camera/recognition)');
+}finally{await b.close();server.close();}})().catch(e=>{console.error(e&&e.stack||e);process.exit(1)});
