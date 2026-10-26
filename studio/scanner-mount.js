@@ -10,7 +10,7 @@
   }
   async function build(rec, container, extraMedia) {
     const holder = document.createElement("a-entity"); holder.dataset.scannerScene = rec.id;
-    const media = (extraMedia || []).slice(), urls = [];
+    const media = (extraMedia || []).slice(), urls = [], mediaEls = []; // mediaEls: {kind,node,el,three} as in the player
     // media is built from the scene's own assets (same attributes as player.js) with ids namespaced by scene id
     const store = document.createElement("div"); store.dataset.scannerMedia = rec.id; store.hidden = true;
     const mid = (e2) => "m-" + rec.id + "-" + e2.id;
@@ -21,7 +21,7 @@
       const m = document.createElement(el.type === "video" ? "video" : "audio");
       m.id = mid(el); m.src = url; m.loop = el.loop !== false; m.preload = "auto";
       if (el.type === "video") { m.muted = true; m.setAttribute("playsinline", ""); m.setAttribute("webkit-playsinline", ""); m.setAttribute("crossorigin", "anonymous"); }
-      store.appendChild(m);
+      store.appendChild(m); mediaEls.push({ kind: el.type === "video" ? "video" : "audio", node: m, el });
     }
     // image elements go through the same pipeline as the player (animated GIF support); built before entities so their src ids resolve
     for (const el of rec.elements || []) {
@@ -46,7 +46,7 @@
     // step 2: parallel tracks (autostart then paused until found) and state/sequence visibility, same calls as the player
     let curSeq = Studio.seqList(rec).length ? Studio.seqList(rec)[0].id : null;
     const trackRunner = Studio.makeTrackRunner(rec, holder);
-    const refreshVisibility = () => Studio.applySequence(holder, rec, curSeq, null, (id) => trackRunner.isPlaying(id));
+    const refreshVisibility = () => Studio.applySequence(holder, rec, curSeq, mediaEls, (id) => trackRunner.isPlaying(id));
     trackRunner.autoStart(); trackRunner.pauseAll(); refreshVisibility();
     const seqRunner = Studio.makeSeqRunner(rec, (to) => setSequence(to));
     function setSequence(id) {
@@ -60,6 +60,30 @@
     }), { autostart: false });
     if (tlDrv) tlDrv.stateLoop = !!(Studio.seqList(rec).find((x) => x.id === curSeq) || {}).loop;
     seqRunner.enter(curSeq);
+    // step 3: actions, taps (mute / next state / state / action / track / link), state-driven media blocking, audio routing + unlock
+    const hasActions = (typeof ActionCore !== "undefined" ? ActionCore.list(rec) : []).length > 0;
+    const actionRunner = hasActions ? Studio.startActionDriver(rec, holder, mediaEls, { paused: true }) : { pause() {}, resume() {}, start() {}, dispose() {} };
+    const stopMonitor = mediaEls.length ? Studio.monitorMedia(holder, rec) : () => {};
+    let muted = false;
+    const onMuteToggle = () => { muted = !muted; for (const x of mediaEls) if (x.three) x.three.gain.gain.value = muted ? 0 : (x.el.volume == null ? 1 : x.el.volume); };
+    const onNextSequence = () => { setSequence(Studio.nextSequence(rec, curSeq)); };
+    const onTrackToggle = (id) => { trackRunner.toggle(id); refreshVisibility(); };
+    holder.querySelectorAll("[data-el-id]").forEach((n) => {
+      const el = rec.elements.find((x) => x.id === n.dataset.elId);
+      if (el) Studio.bindTap(n, el, { onMuteToggle, onNextSequence, onSequence: setSequence, onTrackToggle, onActionSequence: (id) => actionRunner.start(id) });
+    });
+    const sceneEl = container.sceneEl || (container.closest && container.closest("a-scene")) || null;
+    if (mediaEls.length && sceneEl) Studio.connectSpatialAudio(sceneEl, holder, mediaEls);
+    const unlock = () => {
+      for (const x of mediaEls) {
+        if (x.node._studioBlocked) { x.resumeOnVisible = true; continue; }
+        if (x.kind === "video") { if (!muted) x.node.muted = false; if (x.node.paused) x.node.play().catch(() => {}); }
+        else if (x.node.paused) x.node.play().catch(() => {});
+      }
+      const ctx = sceneEl && sceneEl.audioListener && sceneEl.audioListener.context;
+      if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+    };
+    window.addEventListener("pointerdown", unlock);
     // studio-target-video / track components listen for xrextrasfound/lost on their PARENT (the image-target entity in the player).
     // The scanner has no per-scene target entity, so the mount re-emits them on those parents: found on mount and resume, lost on pause.
     const parents = () => [...new Set([...holder.querySelectorAll("[studio-target-video]")].map((n) => n.parentNode))];
@@ -72,12 +96,13 @@
     await ready();
     emit("xrextrasfound"); if (tlDrv) tlDrv.play(); trackRunner.resumeAll();
     // found = visible now, so start media as the player does after found (muted video autoplays; audio may wait for a tap)
-    all().forEach((m) => { try { const pr = m.play(); pr && pr.catch && pr.catch(() => {}); } catch (e) {} });
+    const playAllowed = () => all().forEach((m) => { try { if (m._studioBlocked) return; const pr = m.play(); pr && pr.catch && pr.catch(() => {}); } catch (e) {} });
+    playAllowed(); actionRunner.resume();
     return {
-      state: () => ({ seq: curSeq, tracks: Studio.trackList(rec).map((t) => [t.id, trackRunner.isPlaying(t.id)]) }), setSequence, trackRunner,
-      pause() { holder.setAttribute("visible", false); emit("xrextraslost"); if (tlDrv) tlDrv.pause(); trackRunner.pauseAll(); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
-      resume() { holder.setAttribute("visible", true); emit("xrextrasfound"); if (tlDrv) tlDrv.play(); trackRunner.resumeAll(); all().forEach((m) => { try { const p = m.play(); p && p.catch && p.catch(() => {}); } catch (e) {} }); },
-      destroy() { if (tlDrv) tlDrv.dispose(); trackRunner.dispose(); seqRunner.cancel(); all().forEach((m) => { try { m.pause(); m.removeAttribute("src"); m.load(); m.remove(); } catch (e) {} }); holder.remove(); store.remove(); urls.forEach((u) => URL.revokeObjectURL(u)); },
+      state: () => ({ muted, seq: curSeq, tracks: Studio.trackList(rec).map((t) => [t.id, trackRunner.isPlaying(t.id)]) }), setSequence, trackRunner,
+      pause() { holder.setAttribute("visible", false); emit("xrextraslost"); if (tlDrv) tlDrv.pause(); trackRunner.pauseAll(); actionRunner.pause(); all().forEach((m) => { try { m.pause(); } catch (e) {} }); },
+      resume() { holder.setAttribute("visible", true); emit("xrextrasfound"); if (tlDrv) tlDrv.play(); trackRunner.resumeAll(); actionRunner.resume(); playAllowed(); },
+      destroy() { window.removeEventListener("pointerdown", unlock); stopMonitor(); if (actionRunner.dispose) actionRunner.dispose(); mediaEls.forEach((x) => { try { if (x.three) { x.three.disconnect(); if (x.three.parent) x.three.parent.remove(x.three); } } catch (e) {} }); if (tlDrv) tlDrv.dispose(); trackRunner.dispose(); seqRunner.cancel(); all().forEach((m) => { try { m.pause(); m.removeAttribute("src"); m.load(); m.remove(); } catch (e) {} }); holder.remove(); store.remove(); urls.forEach((u) => URL.revokeObjectURL(u)); },
     };
   }
   root.ScannerMount = { mountScene };
