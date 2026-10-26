@@ -1,0 +1,31 @@
+const {chromium}=require('playwright-core'),assert=require('assert/strict'),server=require('../../server/server');
+// Visible-content check in a REAL (kicked) a-scene with a camera: ScannerMount builds text + image + video from scene assets; entities load, canvas shows non-background pixels, switch replaces content. Headless SwiftShader at 390x844, mode "ar" without the engine (no camera feed, no recognition, no xrextras).
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port,b=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist','--autoplay-policy=no-user-gesture-required']});
+try{const p=await (await b.newContext({viewport:{width:390,height:844}})).newPage();await p.goto(base+'/index.html');await p.waitForSelector('#element-list li');
+ for(const f of ['scanner-core.js','scanner-mount.js'])await p.addScriptTag({url:base+'/'+f});
+ const r=await p.evaluate(async(base)=>{
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const png=(color)=>new Promise(res=>{const c=document.createElement('canvas');c.width=64;c.height=64;const g=c.getContext('2d');g.fillStyle=color;g.fillRect(0,0,64,64);c.toBlob(res,'image/png');});
+  const vb=await (await fetch(base+'/assets/demo/art-video.mp4')).blob();
+  const mkRec=async(id,txt,col)=>{const rec=Studio.blankExperience(id);rec.id=id;rec.target={artRect:{x:0,y:0,w:768,h:1024},natural:{w:768,h:1024}};rec.assets={i1:await png(col),v1:vb};
+   rec.elements=[{id:'t1',type:'text',text:txt,x:0,y:.3,w:.6,h:.12,scale:1},{id:'im',type:'image',assetId:'i1',x:-.2,y:-.1,w:.3,aspect:1,scale:1},{id:'vid',type:'video',assetId:'v1',x:.2,y:-.1,w:.3,aspect:1,scale:1}];return rec;};
+  const scn=document.createElement('a-scene');scn.setAttribute('embedded','');scn.setAttribute('vr-mode-ui','enabled: false');scn.setAttribute('device-orientation-permission-ui','enabled: false');scn.style.cssText='position:fixed;inset:0;z-index:99999';
+  const cam=document.createElement('a-entity');cam.setAttribute('camera','fov: 50');cam.setAttribute('position','0 0 1.6');scn.appendChild(cam);const box=window.__box=document.createElement('a-entity');scn.appendChild(box);document.body.appendChild(scn);
+  const kick=()=>{try{scn.play()}catch(e){}};kick();setTimeout(kick,600);await new Promise(r=>scn.hasLoaded?r():scn.addEventListener('loaded',r,{once:true}));await sleep(500);
+  const sc=window.__sc=ScannerCore.create({catalog:[{name:'a',scene:'scene-aaaa000'},{name:'b',scene:'scene-bbbb000'}],loadScene:async id=>id==='scene-aaaa000'?mkRec(id,'AAA','#ff0000'):mkRec(id,'BBB','#00ff00'),mount:async rec=>ScannerMount.mountScene(rec,box)});
+  const o={};await sc.found('a');await sleep(2500);
+  const ent=()=>[...box.querySelectorAll('[data-el-id]')].map(e=>e.tagName+':'+e.hasLoaded);
+  o.entsA=ent();o.vref=JSON.stringify((box.querySelector('[studio-target-video]')||{getAttribute:()=>null}).getAttribute('studio-target-video'));o.imgOk=[...document.querySelectorAll('img[id^="m-scene-aaaa000"]')].map(i=>i.complete&&i.naturalWidth);
+  o.mediaIds=[...document.querySelectorAll('[data-scanner-media] [id]')].map(m=>m.id);
+  return o;},base);
+ const count=async(buf)=>p.evaluate(async(d)=>{const im=new Image();im.src='data:image/png;base64,'+d;await im.decode();const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const g=c.getContext('2d');g.drawImage(im,0,0);const px=g.getImageData(0,0,c.width,c.height).data;let red=0,green=0;for(let i=0;i<px.length;i+=4){if(px[i]>230&&px[i+1]<40&&px[i+2]<40)red++;if(px[i+1]>230&&px[i]<40&&px[i+2]<40)green++;}return {red,green};},buf.toString('base64'));
+ const shotA=await p.screenshot({path:'/downloads/scanner-render-a-390.png'});const ca=await count(shotA);
+ assert(r.entsA.length===3&&r.entsA.every(x=>x.endsWith(':true')),JSON.stringify(r.entsA));
+ assert(r.vref.includes('m-scene-aaaa000-vid'),r.vref);assert.deepEqual(r.imgOk.map(x=>x>0),[true]);
+ assert(ca.red>2000&&ca.green===0,'scene A image visible (red) on the canvas: '+JSON.stringify(ca));
+ const sw=await p.evaluate(async()=>{const sleep=ms=>new Promise(r=>setTimeout(r,ms));window.__sc.found('b');await sleep(3000);return {holders:[...document.querySelectorAll('[data-scanner-scene]')].map(h=>h.dataset.scannerScene),media:[...document.querySelectorAll('[data-scanner-media] [id]')].map(m=>m.id),conn:window.__box.isConnected};});
+ const shotB=await p.screenshot({path:'/downloads/scanner-render-b-390.png'});const cb=await count(shotB);
+ assert.deepEqual(sw.holders,['scene-bbbb000']);assert.deepEqual(sw.media,['m-scene-bbbb000-vid','m-scene-bbbb000-im']);assert(sw.conn);
+ assert(cb.green>2000&&cb.red===0,'after switch only scene B image (green) is visible: '+JSON.stringify(cb));
+ console.log('PASS scanner-render (headless SwiftShader 390x844, kicked a-scene + camera, no engine): text+image+video entities load with namespaced media, image visible on canvas (A red '+ca.red+'px), switch to B shows green '+cb.green+'px and no red, one holder, container intact. Video plane stays faded out until xrimagefound (not simulated here)');
+}finally{await b.close();await new Promise(r=>server.close(r));}})().catch(e=>{console.error(e);process.exit(1)});

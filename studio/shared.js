@@ -587,7 +587,7 @@ const Studio = (() => {
         e.setAttribute("src", mediaRef(el));
         e.setAttribute("width", ts.w); e.setAttribute("height", ts.h);
         e.setAttribute("material", "transparent: true; opacity: 0");
-        e.setAttribute("studio-target-video", `video: #m-${el.id}`);
+        e.setAttribute("studio-target-video", `video: ${mediaRef(el)}`);
       } else {
         e = document.createElement("a-video");
         e.setAttribute("src", mediaRef(el));
